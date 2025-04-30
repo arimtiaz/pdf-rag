@@ -21,9 +21,7 @@ const embeddings = new GoogleGenerativeAIEmbeddings({
 
 // PDF Loader
 const sourcePdf = "./PDF-Guide-Node-Andrew-Mead-v3.pdf";
-
 const loader = new PDFLoader(sourcePdf);
-
 const docs = await loader.load();
 
 // PDF Splitting
@@ -53,7 +51,7 @@ const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, {
 await vectorStore.addDocuments(splitPDF);
 
 
-// Define a prompt template
+
 const promptTemplate = ChatPromptTemplate.fromMessages([
   ["system", "You are a helpful assistant that answers questions based on the provided context.\nIf the information cannot be found in the context, say you don't know.\n\nContext: {context}"],
   ["human", "{question}"]
