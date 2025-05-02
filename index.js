@@ -58,16 +58,85 @@ const promptTemplate = ChatPromptTemplate.fromMessages([
   ["human", "{question}"]
 ]);
 
-async function main() {
-  let question = "Which application was built at the end of this course";
+// NEW FUNCTION: Query decomposition
+async function decomposeQuery(complexQuery) {
+  const decompositionPrompt = ChatPromptTemplate.fromMessages([
+    ["system", "You are an AI assistant that helps break down complex questions into simpler sub-questions. Return only an array of 2-4 sub-questions in JSON format."],
+    ["human", `Break down this complex query into simple sub-queries that together help answer the original question: "${complexQuery}". 
+    Format your response as a valid JSON array of strings. For example: ["sub-question 1", "sub-question 2", "sub-question 3"]`]
+  ]);
 
-  const retrievedDocs = await vectorStore.similaritySearch(question);
-  const docsContent = retrievedDocs.map((doc) => doc.pageContent).join("\n");
-  const messages = await promptTemplate.invoke({
-    question: question,
-    context: docsContent,
-  });
-  const answer = await model.invoke(messages);
-  console.log(answer.content)
+  const messages = await decompositionPrompt.invoke({});
+  const response = await model.invoke(messages);
+  
+  try {
+    // Parse the response to extract the JSON array
+    const responseText = response.content.toString();
+    // Find anything that looks like a JSON array in the response
+    const jsonMatch = responseText.match(/\[.*\]/s);
+    
+    if (jsonMatch) {
+      const subQueries = JSON.parse(jsonMatch[0]);
+      console.log("Decomposed into:", subQueries);
+      return subQueries;
+    } else {
+      // Fallback if no JSON array is found
+      console.log("Could not parse sub-queries, using original query");
+      return [complexQuery];
+    }
+  } catch (error) {
+    console.error("Error parsing decomposed queries:", error);
+    return [complexQuery]; // Fallback to original query
+  }
 }
-main()
+
+// NEW FUNCTION: Get unique documents from multiple searches
+function deduplicateDocuments(documents) {
+  const uniqueDocs = [];
+  const seenContents = new Set();
+  
+  for (const doc of documents) {
+    // Use a simple approach to identify duplicate documents
+    if (!seenContents.has(doc.pageContent)) {
+      seenContents.add(doc.pageContent);
+      uniqueDocs.push(doc);
+    }
+  }
+  
+  return uniqueDocs;
+}
+
+// MODIFIED: Main function using decomposition
+async function main() {
+  let complexQuestion = "What are the key features of Node.js and how do you build a weather application with it?";
+  
+  // 1. Decompose the complex query
+  const subQueries = await decomposeQuery(complexQuestion);
+  
+  // 2. Retrieve documents for each sub-query
+  let allRetrievedDocs = [];
+  
+  for (const query of subQueries) {
+    console.log(`Searching for: "${query}"`);
+    const docs = await vectorStore.similaritySearch(query, 3); // Get top 3 docs for each sub-query
+    allRetrievedDocs = allRetrievedDocs.concat(docs);
+  }
+  
+  // 3. Deduplicate documents to avoid repetition
+  const uniqueDocs = deduplicateDocuments(allRetrievedDocs);
+  console.log(`Retrieved ${allRetrievedDocs.length} total docs, ${uniqueDocs.length} after deduplication`);
+  
+  // 4. Generate the final answer using all relevant documents
+  const docsContent = uniqueDocs.map((doc) => doc.pageContent).join("\n");
+  
+  const messages = await promptTemplate.invoke({
+    question: complexQuestion, // Use the original question
+    context: docsContent,      // But provide context from all sub-queries
+  });
+  
+  const answer = await model.invoke(messages);
+  console.log("\nFINAL ANSWER:");
+  console.log(answer.content);
+}
+
+main();
